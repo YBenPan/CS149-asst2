@@ -49,13 +49,6 @@ const char* TaskSystemParallelSpawn::name() {
 }
 
 TaskSystemParallelSpawn::TaskSystemParallelSpawn(int num_threads): ITaskSystem(num_threads) {
-    //
-    // TODO: CS149 student implementations may decide to perform setup
-    // operations (such as thread pool construction) here.
-    // Implementations are free to add new class member variables
-    // (requiring changes to tasksys.h).
-    //
-
     this->numThreads = num_threads;
 }
 
@@ -68,32 +61,26 @@ void TaskSystemParallelSpawn::workerThreadStart(WorkerArgs* args) {
 }
 
 void TaskSystemParallelSpawn::run(IRunnable* runnable, int num_total_tasks) {
-
-
-    //
-    // TODO: CS149 students will modify the implementation of this
-    // method in Part A.  The implementation provided below runs all
-    // tasks sequentially on the calling thread.
-    //
     
-    std::thread workers[this->numThreads];
-    WorkerArgs args[this->numThreads];
-    for (int i = 0; i < this->numThreads; i++) {
+    std::thread workers[numThreads];
+    WorkerArgs args[numThreads];
+    for (int i = 0; i < numThreads; i++) {
         args[i].runnable = runnable;
         args[i].threadId = i;
-        args[i].numThreads = this->numThreads;
+        args[i].numThreads = numThreads;
         args[i].num_total_tasks = num_total_tasks;
     }
 
-    for (int i = 1; i < this->numThreads; i++) {
+    for (int i = 1; i < numThreads; i++) {
         workers[i] = std::thread(workerThreadStart, &args[i]);
     }
-    this->workerThreadStart(&args[0]);
+    workerThreadStart(&args[0]);
 
-    for (int i = 1; i < this->numThreads; i++) {
+    for (int i = 1; i < numThreads; i++) {
         workers[i].join();
     }
-    /*
+    /* Serial Implementation
+     * 
     for (int i = 0; i < num_total_tasks; i++) {
         runnable->runTask(i, num_total_tasks);
     }
