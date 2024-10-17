@@ -108,29 +108,67 @@ const char* TaskSystemParallelThreadPoolSpinning::name() {
     return "Parallel + Thread Pool + Spin";
 }
 
-TaskSystemParallelThreadPoolSpinning::TaskSystemParallelThreadPoolSpinning(int num_threads): ITaskSystem(num_threads) {
-    //
-    // TODO: CS149 student implementations may decide to perform setup
-    // operations (such as thread pool construction) here.
-    // Implementations are free to add new class member variables
-    // (requiring changes to tasksys.h).
-    //
+void TaskSystemParallelThreadPoolSpinning::workerThreadStart(int threadId) {
+    int t;
+    while (running) {
+        if (threadId == 0 && num_done_tasks.load() == num_total_tasks) {
+            // We're guaranteed that thread 0 only runs when num_total_tasks > 0
+            return;
+        }
+        queue_lock->lock();
+        if (task_queue.empty()) { 
+            // don't remove if queue empty; 
+            // can't move this outside lock because queue might become empty while waiting to acquire lock
+            queue_lock->unlock();
+            continue;
+        }
+        t = task_queue.front();
+        task_queue.pop();
+        queue_lock->unlock();
+
+        runnable->runTask(t, num_total_tasks);
+
+        num_done_tasks++;
+    }
 }
 
-TaskSystemParallelThreadPoolSpinning::~TaskSystemParallelThreadPoolSpinning() {}
+TaskSystemParallelThreadPoolSpinning::TaskSystemParallelThreadPoolSpinning(int num_threads): ITaskSystem(num_threads) {
+    running = true;
+    this->numThreads = num_threads;
+    queue_lock = new std::mutex();
+    workers = new std::thread[numThreads];
+    
+    for (int i = 1; i < numThreads; i++) {
+        workers[i] = std::thread(&TaskSystemParallelThreadPoolSpinning::workerThreadStart, this, i);
+    }
+}
+
+TaskSystemParallelThreadPoolSpinning::~TaskSystemParallelThreadPoolSpinning() {
+    running = false; 
+    for (int i = 1; i < numThreads; i++) {
+        workers[i].join();
+    }
+    delete queue_lock;
+    delete[] workers;
+}
 
 void TaskSystemParallelThreadPoolSpinning::run(IRunnable* runnable, int num_total_tasks) {
+    this->num_total_tasks = num_total_tasks;
+    this->num_done_tasks = 0;
+    this->runnable = runnable;
+    queue_lock->lock();
+    for (int i = 0; i < num_total_tasks; i++) {
+        task_queue.push(i);
+    }
+    queue_lock->unlock();
 
+    workerThreadStart(0);
 
-    //
-    // TODO: CS149 students will modify the implementation of this
-    // method in Part A.  The implementation provided below runs all
-    // tasks sequentially on the calling thread.
-    //
-
+    /*  
     for (int i = 0; i < num_total_tasks; i++) {
         runnable->runTask(i, num_total_tasks);
     }
+    */
 }
 
 TaskID TaskSystemParallelThreadPoolSpinning::runAsyncWithDeps(IRunnable* runnable, int num_total_tasks,
