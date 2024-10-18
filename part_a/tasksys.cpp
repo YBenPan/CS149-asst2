@@ -222,12 +222,15 @@ TaskSystemParallelThreadPoolSleeping::~TaskSystemParallelThreadPoolSleeping() {
 
 void TaskSystemParallelThreadPoolSleeping::workerThreadStart(int thread_id) {
     int t;
-    while (1) {
+    while (running.load()) {
         std::unique_lock<std::mutex> lk(*worker_lock); // worker_lock protects num_awaken_threads
         worker_condition->wait(lk, [&]{ return ready.load(); }); // waits until main thread is ready and notifies
         num_awaken_threads++;
         printf("Thread %d awaken; # awaken threads: %d\n", thread_id, num_awaken_threads);
         lk.unlock();
+        if (!running.load()) {
+            break;
+        }
         while (num_done_tasks.load() < num_total_tasks || num_awaken_threads < num_threads) {
             // need to check num_awaken_threads to prevent race condition
             // where all work is done before all threads are awaken
