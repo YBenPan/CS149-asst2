@@ -207,7 +207,7 @@ TaskSystemParallelThreadPoolSleeping::TaskSystemParallelThreadPoolSleeping(int n
     for (int i = 0; i < num_threads; i++) {
         Counter.completed[i] = true;
     }
-    for (int i = 1; i < num_threads; i++) {
+    for (int i = 0; i < num_threads; i++) {
         workers[i] = std::thread(&TaskSystemParallelThreadPoolSleeping::workerThreadStart, this, i);
     }
 }
@@ -221,7 +221,7 @@ TaskSystemParallelThreadPoolSleeping::~TaskSystemParallelThreadPoolSleeping() {
     counter_lock->unlock();
     worker_cv->notify_all();
 
-    for (int i = 1; i < num_threads; i++) {
+    for (int i = 0; i < num_threads; i++) {
         workers[i].join();
     }
     delete queue_lock;
@@ -242,10 +242,10 @@ void TaskSystemParallelThreadPoolSleeping::workerThreadStart(int thread_id) {
         // printf("Thread %d; completed: %d; # done_tasks: %d; # total tasks: %d\n", thread_id, Counter.completed[thread_id], Counter.num_done_tasks, Counter.num_total_tasks);
         worker_cv->wait(lk, [&]{ 
                 // counter_lock->lock();
-                bool flag = !Counter.completed[thread_id] || Counter.num_done_tasks < Counter.num_total_tasks;
+                return !Counter.completed[thread_id] || Counter.num_done_tasks < Counter.num_total_tasks;
                 // printf("Thread %d checking predicate; flag: %d\n", thread_id, flag);
                 // counter_lock->unlock(); 
-                return flag;});
+                // return flag;});
         // atomic variable here??
         // printf("Thread %d; unlocked!\n", thread_id);
         if (task_queue.empty()) {
@@ -255,11 +255,17 @@ void TaskSystemParallelThreadPoolSleeping::workerThreadStart(int thread_id) {
             }
         }
         else {
+            // Retrieves task from queue
+            // TODO: Optimization from using custom class instead of std::queue
             t = task_queue.front();
             task_queue.pop();
             lk.unlock();
+
+            // Notifies another thread to proceed
+            worker_cv->notify_one();
             // printf("Thread %d; releases queue_lock; claims task %d\n", thread_id, t);
             runnable->runTask(t, Counter.num_total_tasks);
+            // TODO: Optimization from using atomic variable for num_done_tasks?
             counter_lock->lock();
             Counter.num_done_tasks++;
             counter_lock->unlock();
@@ -270,10 +276,15 @@ void TaskSystemParallelThreadPoolSleeping::workerThreadStart(int thread_id) {
             Counter.completed[thread_id] = true;
             Counter.num_completed_threads++; 
             counter_lock->unlock();
+            if (Counter.num_completed_threads == num_threads) {
+                main_cv->notify_all();
+            }
             // printf("Thread %d done! # done threads: %d\n", thread_id, Counter.num_completed_threads);
+            /*
             if (thread_id == 0) {
                 return;
             }
+            */
         }
         else {
             counter_lock->unlock();
@@ -301,15 +312,19 @@ void TaskSystemParallelThreadPoolSleeping::run(IRunnable* runnable, int num_tota
     
     // workerThreadStart(0);
 
-    // std::unique_lock<std::mutex> lk(*counter_lock);
+    std::unique_lock<std::mutex> lk(*counter_lock);
+    worker_cv->notify_all();
+    
+    /*
     while (Counter.num_completed_threads != num_threads - 1) {
         worker_cv->notify_all();
     }
+    */
     // main_cv->wait(lk, [&]{ return Counter.num_completed_threads == num_threads; });
+    main_cv->wait(lk);
     // printf("DONE\n");
-    // lk.unlock();
+    lk.unlock();
 
-    // TODO: add another condition variable to let main go to sleep
     /*
     for (int i = 0; i < num_total_tasks; i++) {
         runnable->runTask(i, num_total_tasks);
