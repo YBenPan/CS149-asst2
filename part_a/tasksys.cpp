@@ -242,7 +242,7 @@ void TaskSystemParallelThreadPoolSleeping::workerThreadStart(int thread_id) {
         // printf("Thread %d; completed: %d; # done_tasks: %d; # total tasks: %d\n", thread_id, Counter.completed[thread_id], Counter.num_done_tasks, Counter.num_total_tasks);
         worker_cv->wait(lk, [&]{ 
                 // counter_lock->lock();
-                return !Counter.completed[thread_id] || Counter.num_done_tasks < Counter.num_total_tasks;
+                return !Counter.completed[thread_id] || Counter.num_done_tasks < Counter.num_total_tasks;});
                 // printf("Thread %d checking predicate; flag: %d\n", thread_id, flag);
                 // counter_lock->unlock(); 
                 // return flag;});
