@@ -93,15 +93,18 @@ class TaskSystemParallelThreadPoolSleeping: public ITaskSystem {
     private:
         std::queue<int> task_queue;
         std::mutex* queue_lock;
-        std::mutex* worker_lock;
-        std::condition_variable* worker_condition;
+        std::mutex* counter_lock;
+        std::condition_variable* main_cv;
+        std::condition_variable* worker_cv; 
         std::thread* workers;
+        struct { // will be protected under counter_lock
+            int num_total_tasks;
+            int num_done_tasks;
+            int num_completed_threads;
+            bool* completed;
+        } Counter;
         int num_threads;
-        int num_total_tasks;
-        int num_awaken_threads; // condition 
-        std::atomic<int> num_done_tasks;
         std::atomic<bool> running;
-        std::atomic<bool> ready;
         IRunnable* runnable;
         void workerThreadStart(int thread_id);
 };

@@ -194,71 +194,95 @@ const char* TaskSystemParallelThreadPoolSleeping::name() {
 
 TaskSystemParallelThreadPoolSleeping::TaskSystemParallelThreadPoolSleeping(int num_threads): ITaskSystem(num_threads) {
     running = true;
-    ready = false;
     this->num_threads = num_threads;
     queue_lock = new std::mutex();
-    worker_lock = new std::mutex();
-    worker_condition = new std::condition_variable();
+    counter_lock = new std::mutex();
+    main_cv = new std::condition_variable();
+    worker_cv = new std::condition_variable();
     workers = new std::thread[num_threads];
 
+    Counter.completed = new bool[num_threads];    
+    Counter.num_done_tasks = 0;
+    Counter.num_total_tasks = 0;
     for (int i = 0; i < num_threads; i++) {
+        Counter.completed[i] = true;
+    }
+    for (int i = 1; i < num_threads; i++) {
         workers[i] = std::thread(&TaskSystemParallelThreadPoolSleeping::workerThreadStart, this, i);
     }
 }
 
 TaskSystemParallelThreadPoolSleeping::~TaskSystemParallelThreadPoolSleeping() {
     running = false;
-    ready = true;
-    num_total_tasks = 0;
-    worker_condition->notify_all();
+    counter_lock->lock();
     for (int i = 0; i < num_threads; i++) {
+        Counter.completed[i] = false;
+    }
+    counter_lock->unlock();
+    worker_cv->notify_all();
+
+    for (int i = 1; i < num_threads; i++) {
         workers[i].join();
     }
     delete queue_lock;
-    delete worker_lock;
-    delete worker_condition;
+    delete counter_lock;
+    delete main_cv;
+    delete worker_cv;
     delete[] workers;
+    delete[] Counter.completed;
 }
 
 void TaskSystemParallelThreadPoolSleeping::workerThreadStart(int thread_id) {
     int t;
-    while (running.load()) {
-        std::unique_lock<std::mutex> lk(*worker_lock); // worker_lock protects num_awaken_threads
-        worker_condition->wait(lk, [&]{ return ready.load(); }); // waits until main thread is ready and notifies
-        num_awaken_threads++;
-        printf("Thread %d awaken; # awaken threads: %d\n", thread_id, num_awaken_threads);
-        lk.unlock();
-        if (!running.load()) {
-            break;
-        }
-        while (num_done_tasks.load() < num_total_tasks || num_awaken_threads < num_threads) {
-            // need to check num_awaken_threads to prevent race condition
-            // where all work is done before all threads are awaken
-            queue_lock->lock();
-            if (task_queue.empty()) { // waiting on other threads to be awaken or tasks to finish
-                queue_lock->unlock();
-                continue; 
+    while (running) {
+        std::unique_lock<std::mutex> lk(*queue_lock);
+        // while (Counter.completed[thread_id] && Counter.num_done_tasks == Counter.num_total_tasks) {
+        // }
+        // worker_cv->wait(lk);
+        // printf("Thread %d; completed: %d; # done_tasks: %d; # total tasks: %d\n", thread_id, Counter.completed[thread_id], Counter.num_done_tasks, Counter.num_total_tasks);
+        worker_cv->wait(lk, [&]{ 
+                // counter_lock->lock();
+                bool flag = !Counter.completed[thread_id] || Counter.num_done_tasks < Counter.num_total_tasks;
+                // printf("Thread %d checking predicate; flag: %d\n", thread_id, flag);
+                // counter_lock->unlock(); 
+                return flag;});
+        // atomic variable here??
+        // printf("Thread %d; unlocked!\n", thread_id);
+        if (task_queue.empty()) {
+            lk.unlock();
+            if (!running) {
+                return;
             }
+        }
+        else {
             t = task_queue.front();
             task_queue.pop();
-            queue_lock->unlock();
-
-            runnable->runTask(t, num_total_tasks);
-
-            num_done_tasks++;
-            printf("Thread %d finished task %d; # done tasks: %d; # total tasks: %d\n", thread_id, t, num_done_tasks.load(), num_total_tasks);
+            lk.unlock();
+            // printf("Thread %d; releases queue_lock; claims task %d\n", thread_id, t);
+            runnable->runTask(t, Counter.num_total_tasks);
+            counter_lock->lock();
+            Counter.num_done_tasks++;
+            counter_lock->unlock();
+            // printf("Task %d done!\n", t);
         }
-        ready = false;
+        counter_lock->lock();
+        if (Counter.num_done_tasks == Counter.num_total_tasks) {
+            Counter.completed[thread_id] = true;
+            Counter.num_completed_threads++; 
+            counter_lock->unlock();
+            // printf("Thread %d done! # done threads: %d\n", thread_id, Counter.num_completed_threads);
+            if (thread_id == 0) {
+                return;
+            }
+        }
+        else {
+            counter_lock->unlock();
+        }
     }
 }
 
 void TaskSystemParallelThreadPoolSleeping::run(IRunnable* runnable, int num_total_tasks) {
-    printf("NEW RUN; %d\n\n", ready.load());
-    this->num_total_tasks = num_total_tasks;
-    worker_lock->lock();
-    this->num_awaken_threads = 0; // TODO: lock necessary here?
-    worker_lock->unlock();
-    this->num_done_tasks = 0;
+    // printf("NEW RUN\n\n");
     this->runnable = runnable;
     queue_lock->lock();
     for (int i = 0; i < num_total_tasks; i++) {
@@ -266,12 +290,25 @@ void TaskSystemParallelThreadPoolSleeping::run(IRunnable* runnable, int num_tota
     }
     queue_lock->unlock();
 
-    ready = true;
-    worker_condition->notify_all();
-    while (num_done_tasks.load() < num_total_tasks || num_awaken_threads < num_threads) {
+    counter_lock->lock();
+    Counter.num_total_tasks = num_total_tasks;
+    Counter.num_done_tasks = 0;
+    Counter.num_completed_threads = 0;
+    for (int i = 0; i < num_threads; i++) {
+        Counter.completed[i] = false;
     }
-    printf("DONE\n");
-    // getchar();
+    counter_lock->unlock();
+    
+    // workerThreadStart(0);
+
+    // std::unique_lock<std::mutex> lk(*counter_lock);
+    while (Counter.num_completed_threads != num_threads - 1) {
+        worker_cv->notify_all();
+    }
+    // main_cv->wait(lk, [&]{ return Counter.num_completed_threads == num_threads; });
+    // printf("DONE\n");
+    // lk.unlock();
+
     // TODO: add another condition variable to let main go to sleep
     /*
     for (int i = 0; i < num_total_tasks; i++) {
