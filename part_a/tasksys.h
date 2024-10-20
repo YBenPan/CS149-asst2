@@ -91,7 +91,6 @@ class TaskSystemParallelThreadPoolSleeping: public ITaskSystem {
         void sync();
 
     private:
-        std::queue<int> task_queue;
         std::mutex* queue_lock;
         std::mutex* counter_lock;
         std::condition_variable* main_cv;
@@ -104,6 +103,10 @@ class TaskSystemParallelThreadPoolSleeping: public ITaskSystem {
             bool* completed;
         } Counter;
         int num_threads;
+        struct {
+            int cur_task;
+            int capacity;
+        } Queue;
         std::atomic<bool> running;
         IRunnable* runnable;
         void workerThreadStart(int thread_id);
