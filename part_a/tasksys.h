@@ -2,7 +2,13 @@
 #define _TASKSYS_H
 
 #include "itasksys.h"
-
+#include <vector>
+#include <thread>
+#include <cmath>
+#include <queue>
+#include <mutex>
+#include <atomic>
+#include <condition_variable>
 /*
  * TaskSystemSerial: This class is the student's implementation of a
  * serial task execution engine.  See definition of ITaskSystem in
@@ -34,9 +40,7 @@ class TaskSystemParallelSpawn: public ITaskSystem {
         TaskID runAsyncWithDeps(IRunnable* runnable, int num_total_tasks,
                                 const std::vector<TaskID>& deps);
         void sync();
-   
     private:
-        int numThreads;
         typedef struct {
             IRunnable* runnable;
             int threadId;
@@ -44,6 +48,7 @@ class TaskSystemParallelSpawn: public ITaskSystem {
             int num_total_tasks;
         } WorkerArgs;
         static void workerThreadStart(WorkerArgs* args);
+	int numThreads;
 };
 
 /*
@@ -91,25 +96,24 @@ class TaskSystemParallelThreadPoolSleeping: public ITaskSystem {
         void sync();
 
     private:
-        std::mutex* queue_lock;
-        std::mutex* counter_lock;
-        std::condition_variable* main_cv;
-        std::condition_variable* worker_cv; 
-        std::thread* workers;
-        struct { // will be protected under counter_lock
-            int num_total_tasks;
-            int num_done_tasks;
-            int num_completed_threads;
-            bool* completed;
-        } Counter;
-        int num_threads;
-        struct {
-            int cur_task;
-            int capacity;
-        } Queue;
-        std::atomic<bool> running;
-        IRunnable* runnable;
-        void workerThreadStart(int thread_id);
+
+    IRunnable* runnable;
+    int numThreads;
+    std::atomic<bool> running;
+    std::atomic<int> num_done_tasks;
+    int num_total_tasks;
+    std::condition_variable worker_cv;
+    std::mutex queue_lock;
+    std::queue<int> task_queue;
+    std::vector<std::thread> workers; //holds all workers, pushed to thread
+
+    std::condition_variable main_cv;
+
+    std::mutex calling_lock; //lock for the main thread
+
+    void workerThreadStart();
+
+
 };
 
 #endif
