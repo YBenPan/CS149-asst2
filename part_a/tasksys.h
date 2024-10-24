@@ -91,10 +91,10 @@ class TaskSystemParallelThreadPoolSleeping: public ITaskSystem {
         void sync();
 
     private:
-        std::mutex* queue_lock;
-        std::mutex* counter_lock;
-        std::condition_variable* main_cv;
-        std::condition_variable* worker_cv; 
+        std::mutex queue_lock;
+        std::mutex counter_lock;
+        std::condition_variable main_cv;
+        std::condition_variable worker_cv; 
         std::thread* workers;
         struct { // will be protected under counter_lock
             int num_total_tasks;

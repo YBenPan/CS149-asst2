@@ -195,10 +195,12 @@ const char* TaskSystemParallelThreadPoolSleeping::name() {
 TaskSystemParallelThreadPoolSleeping::TaskSystemParallelThreadPoolSleeping(int num_threads): ITaskSystem(num_threads) {
     running = true;
     this->num_threads = num_threads;
+    /*
     queue_lock = new std::mutex();
     counter_lock = new std::mutex();
     main_cv = new std::condition_variable();
     worker_cv = new std::condition_variable();
+    */
     workers = new std::thread[num_threads];
 
     Counter.completed = new bool[num_threads];    
@@ -214,20 +216,22 @@ TaskSystemParallelThreadPoolSleeping::TaskSystemParallelThreadPoolSleeping(int n
 
 TaskSystemParallelThreadPoolSleeping::~TaskSystemParallelThreadPoolSleeping() {
     running = false;
-    counter_lock->lock();
+    counter_lock.lock();
     for (int i = 0; i < num_threads; i++) {
         Counter.completed[i] = false;
     }
-    counter_lock->unlock();
-    worker_cv->notify_all();
+    counter_lock.unlock();
+    worker_cv.notify_all();
 
     for (int i = 0; i < num_threads; i++) {
         workers[i].join();
     }
+    /*
     delete queue_lock;
     delete counter_lock;
     delete main_cv;
     delete worker_cv;
+    */
     delete[] workers;
     delete[] Counter.completed;
 }
@@ -235,8 +239,8 @@ TaskSystemParallelThreadPoolSleeping::~TaskSystemParallelThreadPoolSleeping() {
 void TaskSystemParallelThreadPoolSleeping::workerThreadStart(int thread_id) {
     int t;
     while (running) {
-        std::unique_lock<std::mutex> lk(*queue_lock);
-        worker_cv->wait(lk, [&]{ 
+        std::unique_lock<std::mutex> lk(queue_lock);
+        worker_cv.wait(lk, [&]{ 
                 return !Counter.completed[thread_id] || Counter.num_done_tasks < Counter.num_total_tasks;
                 });
         if (Queue.cur_task >= Queue.capacity) {
@@ -251,47 +255,47 @@ void TaskSystemParallelThreadPoolSleeping::workerThreadStart(int thread_id) {
             lk.unlock();
 
             // Notifies another thread to proceed
-            worker_cv->notify_one();
+            worker_cv.notify_one();
             runnable->runTask(t, Counter.num_total_tasks);
 
-            counter_lock->lock();
+            counter_lock.lock();
             Counter.num_done_tasks++;
-            counter_lock->unlock();
+            counter_lock.unlock();
         }
-        counter_lock->lock();
+        counter_lock.lock();
         if (Counter.num_done_tasks == Counter.num_total_tasks) {
             Counter.completed[thread_id] = true;
             Counter.num_completed_threads++; 
-            counter_lock->unlock();
+            counter_lock.unlock();
             if (Counter.num_completed_threads == num_threads) {
-                main_cv->notify_all();
+                main_cv.notify_all();
             }
         }
         else {
-            counter_lock->unlock();
+            counter_lock.unlock();
         }
     }
 }
 
 void TaskSystemParallelThreadPoolSleeping::run(IRunnable* runnable, int num_total_tasks) {
     this->runnable = runnable;
-    queue_lock->lock();
+    queue_lock.lock();
     Queue.cur_task = 0;
     Queue.capacity = num_total_tasks; 
-    queue_lock->unlock();
+    queue_lock.unlock();
 
-    counter_lock->lock();
+    counter_lock.lock();
     Counter.num_total_tasks = num_total_tasks;
     Counter.num_done_tasks = 0;
     Counter.num_completed_threads = 0;
     for (int i = 0; i < num_threads; i++) {
         Counter.completed[i] = false;
     }
-    counter_lock->unlock();
+    counter_lock.unlock();
     
-    std::unique_lock<std::mutex> lk(*counter_lock);
-    worker_cv->notify_all();
-    main_cv->wait(lk);
+    std::unique_lock<std::mutex> lk(counter_lock);
+    worker_cv.notify_all();
+    main_cv.wait(lk);
     lk.unlock();
 
 }
